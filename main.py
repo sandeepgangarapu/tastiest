@@ -1,5 +1,6 @@
 import json
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 from openai import OpenAI
@@ -28,7 +29,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# 4. Define the data models for request and response
+# 4. Add CORS middleware to allow cross-origin requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
+
+# 5. Define the data models for request and response
 # This ensures our API has a clear and validated structure.
 class ItemRequest(BaseModel):
     item_name: str
@@ -38,7 +48,7 @@ class TSAResponse(BaseModel):
     checked_bag: bool
     description: str
 
-# 5. The System Prompt for the AI Model
+# 6. The System Prompt for the AI Model
 # This is the most important part for getting reliable results.
 # We instruct the AI on its role and the exact JSON format to return.
 SYSTEM_PROMPT = """
@@ -66,7 +76,7 @@ If the item is "Dynamite", your response should be:
 }
 """
 
-# 6. Define the API endpoint
+# 7. Define the API endpoint
 @app.post("/check-item", response_model=TSAResponse)
 async def check_item(request: ItemRequest):
     """

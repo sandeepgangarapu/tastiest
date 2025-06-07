@@ -22,3 +22,13 @@ coverage.xml
 .hypothesis
 .env
 .DS_Store 
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# IDEs
+.vscode/
+.idea/
+
