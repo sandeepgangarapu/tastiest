@@ -4,11 +4,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 from openai import OpenAI
+from supabase import create_client, Client
 
 # 1. Configuration using Pydantic's BaseSettings
 # This automatically reads environment variables from a .env file
 class Settings(BaseSettings):
     OPENROUTER_API_KEY: str
+    SUPABASE_URL: str = "https://lknezacnsyzjtzusinbl.supabase.co"
+    SUPABASE_ANON_KEY: str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrbmV6YWNuc3l6anR6dXNpbmJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkyNTM0NjQsImV4cCI6MjA2NDgyOTQ2NH0.JbrRtMHpNJUuV0Nw-C-U5jlV9VAPhJSPuoLDEEqUUV0"
 
     class Config:
         env_file = ".env"
@@ -22,14 +25,17 @@ client = OpenAI(
     api_key=settings.OPENROUTER_API_KEY,
 )
 
-# 3. Initialize the FastAPI app
+# 3. Initialize Supabase client
+supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
+
+# 4. Initialize the FastAPI app
 app = FastAPI(
     title="TSA Item Checker API",
     description="An API to check if an item is allowed in carry-on or checked baggage.",
     version="1.0.0",
 )
 
-# 4. Add CORS middleware to allow cross-origin requests
+# 5. Add CORS middleware to allow cross-origin requests
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allows all origins
@@ -38,7 +44,7 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-# 5. Define the data models for request and response
+# 6. Define the data models for request and response
 # This ensures our API has a clear and validated structure.
 class ItemRequest(BaseModel):
     item_name: str
@@ -48,7 +54,7 @@ class TSAResponse(BaseModel):
     checked_bag: bool
     description: str
 
-# 6. The System Prompt for the AI Model
+# 7. The System Prompt for the AI Model
 # This is the most important part for getting reliable results.
 # We instruct the AI on its role and the exact JSON format to return.
 SYSTEM_PROMPT = """
@@ -76,11 +82,12 @@ If the item is "Dynamite", your response should be:
 }
 """
 
-# 7. Define the API endpoint
+# 8. Define the API endpoint
 @app.post("/check-item", response_model=TSAResponse)
 async def check_item(request: ItemRequest):
     """
     Accepts an item name and returns its TSA carry-on and checked bag status.
+    Also stores the result in Supabase database.
     """
     try:
         completion = client.chat.completions.create(
@@ -98,6 +105,22 @@ async def check_item(request: ItemRequest):
         # Parse the JSON string from the AI's response
         data = json.loads(response_content)
 
+        # Store the result in Supabase
+        try:
+            result = supabase.table("tsa_checks").insert({
+                "item_name": request.item_name,
+                "carry_on": data["carry_on"],
+                "checked_bag": data["checked_bag"],
+                "description": data["description"]
+            }).execute()
+            
+            print(f"Successfully stored TSA check for '{request.item_name}' in Supabase")
+            
+        except Exception as supabase_error:
+            print(f"Failed to store in Supabase: {str(supabase_error)}")
+            # Continue execution even if Supabase storage fails
+            pass
+
         # FastAPI will automatically validate this against the TSAResponse model
         return data
 
@@ -114,3 +137,14 @@ async def check_item(request: ItemRequest):
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the TSA Item Checker API. Go to /docs for more info."}
+
+@app.get("/history")
+async def get_history():
+    """
+    Get the history of all TSA checks from Supabase.
+    """
+    try:
+        result = supabase.table("tsa_checks").select("*").order("created_at", desc=True).execute()
+        return {"history": result.data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch history: {str(e)}")
